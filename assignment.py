@@ -13,9 +13,11 @@ PICKLE_FILE = 'notMNIST.pickle'
 IMAGE_SIZE = 28
 NUM_LABELS = 10
 BATCH_SIZE = 128
-NUM_STEPS = 3001
+NUM_STEPS = 6001
 NUM_HIDDEN_LAYER_NEURONS = 1024
 LEARNING_RATE = 0.5
+LAMBDA_1 = 0.001
+LAMBDA_2 = 0.001
 
 
 def reformat(dataset, labels):
@@ -78,7 +80,9 @@ if __name__ == '__main__':
         hidden_logits = tf.matmul(tf_train_dataset, weights_1) + biases_1
         hidden_activations = tf.nn.relu(hidden_logits)
         logits = tf.matmul(hidden_activations, weights_2) + biases_2
-        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits, tf_train_labels))
+        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits, tf_train_labels)) + \
+               LAMBDA_1 * tf.nn.l2_loss(weights_1) + LAMBDA_2 * tf.nn.l2_loss(weights_2) + \
+               LAMBDA_1 * tf.nn.l2_loss(biases_1) + LAMBDA_2 * tf.nn.l2_loss(biases_2)
 
         # Optimizer.
         optimizer = tf.train.GradientDescentOptimizer(LEARNING_RATE).minimize(loss)
