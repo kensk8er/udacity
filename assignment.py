@@ -2,6 +2,7 @@
 """
 Python code for the assignment 2.
 """
+from __future__ import print_function
 import numpy as np
 import tensorflow as tf
 import cPickle as pickle
