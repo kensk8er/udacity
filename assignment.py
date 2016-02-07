@@ -13,11 +13,15 @@ PICKLE_FILE = 'notMNIST.pickle'
 IMAGE_SIZE = 28
 NUM_LABELS = 10
 BATCH_SIZE = 128
-NUM_STEPS = 6001
-NUM_HIDDEN_LAYER_NEURONS = 1024
-LEARNING_RATE = 0.5
-LAMBDA_1 = 0.001
-LAMBDA_2 = 0.001
+NUM_STEPS = 20001
+HIDDEN_LAYER_1 = 1024
+HIDDEN_LAYER_2 = 300
+INITIAL_LEARNING_RATE = 0.04
+LAMBDA_1 = 0.01
+LAMBDA_2 = 0.01
+LAMBDA_3 = 0.0001
+DROPOUT_PROBABILITY = 0.5
+EARLY_STOP_PERIOD = 30
 
 
 def reformat(dataset, labels):
@@ -60,6 +64,10 @@ if __name__ == '__main__':
     print('Validation set', valid_dataset.shape, valid_labels.shape)
     print('Test set', test_dataset.shape, test_labels.shape)
 
+    # # restrict training data to just a few batches
+    # train_dataset = train_dataset[:256]
+    # train_labels = train_labels[:256]
+
     # Build the graph
     graph = tf.Graph()
     with graph.as_default():
@@ -71,28 +79,61 @@ if __name__ == '__main__':
         tf_test_dataset = tf.constant(test_dataset)
 
         # Variables.
-        weights_1 = tf.Variable(tf.truncated_normal([IMAGE_SIZE * IMAGE_SIZE, NUM_HIDDEN_LAYER_NEURONS]))
-        biases_1 = tf.Variable(tf.zeros([NUM_HIDDEN_LAYER_NEURONS]))
-        weights_2 = tf.Variable(tf.truncated_normal([NUM_HIDDEN_LAYER_NEURONS, NUM_LABELS]))
-        biases_2 = tf.Variable(tf.zeros([NUM_LABELS]))
+        weights_1 = tf.Variable(tf.truncated_normal([IMAGE_SIZE * IMAGE_SIZE, HIDDEN_LAYER_1]))
+        biases_1 = tf.Variable(tf.zeros([HIDDEN_LAYER_1]))
+        weights_2 = tf.Variable(tf.truncated_normal([HIDDEN_LAYER_1, HIDDEN_LAYER_2]))
+        biases_2 = tf.Variable(tf.zeros([HIDDEN_LAYER_2]))
+        weights_3 = tf.Variable(tf.truncated_normal([HIDDEN_LAYER_2, NUM_LABELS]))
+        biases_3 = tf.Variable(tf.zeros([NUM_LABELS]))
+        global_step = tf.Variable(0, trainable=False)
+        learning_rate = tf.train.exponential_decay(INITIAL_LEARNING_RATE, global_step, decay_steps=1000, decay_rate=0.9)
 
         # Training computation.
-        hidden_logits = tf.matmul(tf_train_dataset, weights_1) + biases_1
-        hidden_activations = tf.nn.relu(hidden_logits)
-        logits = tf.matmul(hidden_activations, weights_2) + biases_2
+        hidden_activations_1 = tf.nn.relu_layer(tf_train_dataset, weights_1, biases_1)
+        # hidden_activations_1 = tf.nn.dropout(hidden_activations_1, DROPOUT_PROBABILITY)
+        hidden_activations_2 = tf.nn.relu_layer(hidden_activations_1, weights_2, biases_2)
+        # hidden_activations_2 = tf.nn.dropout(hidden_activations_2, DROPOUT_PROBABILITY)
+        logits = tf.matmul(hidden_activations_2, weights_3) + biases_3
         loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits, tf_train_labels)) + \
-               LAMBDA_1 * tf.nn.l2_loss(weights_1) + LAMBDA_2 * tf.nn.l2_loss(weights_2) + \
-               LAMBDA_1 * tf.nn.l2_loss(biases_1) + LAMBDA_2 * tf.nn.l2_loss(biases_2)
+               LAMBDA_1 * tf.nn.l2_loss(weights_1) + LAMBDA_2 * tf.nn.l2_loss(weights_2) + LAMBDA_3 * tf.nn.l2_loss(weights_3) + \
+               LAMBDA_1 * tf.nn.l2_loss(biases_1) + LAMBDA_2 * tf.nn.l2_loss(biases_2) + LAMBDA_3 * tf.nn.l2_loss(weights_3) \
 
         # Optimizer.
-        optimizer = tf.train.GradientDescentOptimizer(LEARNING_RATE).minimize(loss)
+        optimizer = tf.train.GradientDescentOptimizer(INITIAL_LEARNING_RATE).minimize(loss=loss,
+                                                                                      global_step=global_step)
 
         # Predictions for the train, validation, and test data.
-        train_prediction = tf.nn.softmax(logits)
+        train_prediction = tf.nn.softmax(
+            tf.matmul(
+                tf.nn.relu_layer(
+                    tf.nn.relu_layer(tf_train_dataset, weights_1, biases_1),
+                    weights_2, biases_2,
+                ),
+                weights_3
+            ) + biases_3
+        )
         valid_prediction = tf.nn.softmax(
-            tf.matmul(tf.nn.relu(tf.matmul(tf_valid_dataset, weights_1) + biases_1), weights_2) + biases_2)
+            tf.matmul(
+                tf.nn.relu_layer(
+                    tf.nn.relu_layer(tf_valid_dataset, weights_1, biases_1),
+                    weights_2, biases_2,
+                ),
+                weights_3
+            ) + biases_3
+        )
         test_prediction = tf.nn.softmax(
-            tf.matmul(tf.nn.relu(tf.matmul(tf_test_dataset, weights_1) + biases_1), weights_2) + biases_2)
+            tf.matmul(
+                tf.nn.relu_layer(
+                    tf.nn.relu_layer(tf_test_dataset, weights_1, biases_1),
+                    weights_2, biases_2,
+                ),
+                weights_3
+            ) + biases_3
+        )
+
+    # for early stopping
+    past_valid_accuracy = [0. for _ in range(30)]
+    average_valid_accuracy = 0.
 
     # Run the graph session
     with tf.Session(graph=graph) as session:
@@ -115,8 +156,17 @@ if __name__ == '__main__':
             _, l, predictions = session.run([optimizer, loss, train_prediction], feed_dict=feed_dict)
 
             if step % 100 == 0:
+                valid_accuracy = accuracy(valid_prediction.eval(), valid_labels)
                 print("Minibatch loss at step %d: %f" % (step, l))
                 print("Minibatch accuracy: %.1f%%" % accuracy(predictions, batch_labels))
-                print("Validation accuracy: %.1f%%" % accuracy(valid_prediction.eval(), valid_labels))
+                print("Validation accuracy: %.1f%%" % valid_accuracy)
+
+                past_valid_accuracy.insert(0, valid_accuracy)
+
+                if np.mean(past_valid_accuracy[:EARLY_STOP_PERIOD]) < average_valid_accuracy:
+                    print('Early Stop.')
+                    break
+                else:
+                    average_valid_accuracy = np.mean(past_valid_accuracy[:EARLY_STOP_PERIOD])
 
         print("Test accuracy: %.1f%%" % accuracy(test_prediction.eval(), test_labels))
