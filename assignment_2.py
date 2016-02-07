@@ -13,7 +13,8 @@ IMAGE_SIZE = 28
 NUM_LABELS = 10
 BATCH_SIZE = 128
 NUM_STEPS = 3001
-NUM_HIDDEN_LAYER_NEURONS = 28 * 28
+NUM_HIDDEN_LAYER_NEURONS = 1024
+LEARNING_RATE = 0.5
 
 
 def reformat(dataset, labels):
@@ -42,23 +43,6 @@ def load_data():
 
 def accuracy(predictions, labels):
     return 100.0 * np.sum(np.argmax(predictions, 1) == np.argmax(labels, 1)) / predictions.shape[0]
-
-
-def forward_path(X, weights_list, biases_list):
-    activation = None
-
-    for weights, biases in zip(weights_list, biases_list):
-        if activation is None:
-            activation = X
-
-        logits = tf.matmul(activation, weights) + biases
-        activation = tf.nn.softmax(logits)
-
-    return activation
-
-
-def cross_entropy(y_true, y_pred):
-    return -tf.reduce_sum(y_true * tf.log(y_pred), reduction_indices=0)
 
 
 if __name__ == '__main__':
@@ -90,15 +74,20 @@ if __name__ == '__main__':
         biases_2 = tf.Variable(tf.zeros([NUM_LABELS]))
 
         # Training computation.
-        train_prediction = forward_path(tf_train_dataset, [weights_1, weights_2], [biases_1, biases_2])
-        loss = tf.reduce_mean(cross_entropy(tf_train_labels, train_prediction))
+        hidden_logits = tf.matmul(tf_train_dataset, weights_1) + biases_1
+        hidden_activations = tf.nn.relu(hidden_logits)
+        logits = tf.matmul(hidden_activations, weights_2) + biases_2
+        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits, tf_train_labels))
 
         # Optimizer.
-        optimizer = tf.train.GradientDescentOptimizer(0.5).minimize(loss)
+        optimizer = tf.train.GradientDescentOptimizer(LEARNING_RATE).minimize(loss)
 
-        # Predictions for the validation, and test data.
-        valid_prediction = forward_path(tf_valid_dataset, [weights_1, weights_2], [biases_1, biases_2])
-        test_prediction = forward_path(tf_test_dataset, [weights_1, weights_2], [biases_1, biases_2])
+        # Predictions for the train, validation, and test data.
+        train_prediction = tf.nn.softmax(logits)
+        valid_prediction = tf.nn.softmax(
+            tf.matmul(tf.nn.relu(tf.matmul(tf_valid_dataset, weights_1) + biases_1), weights_2) + biases_2)
+        test_prediction = tf.nn.softmax(
+            tf.matmul(tf.nn.relu(tf.matmul(tf_test_dataset, weights_1) + biases_1), weights_2) + biases_2)
 
     # Run the graph session
     with tf.Session(graph=graph) as session:
@@ -120,7 +109,7 @@ if __name__ == '__main__':
             feed_dict = {tf_train_dataset: batch_data, tf_train_labels: batch_labels}
             _, l, predictions = session.run([optimizer, loss, train_prediction], feed_dict=feed_dict)
 
-            if step % 500 == 0:
+            if step % 100 == 0:
                 print("Minibatch loss at step %d: %f" % (step, l))
                 print("Minibatch accuracy: %.1f%%" % accuracy(predictions, batch_labels))
                 print("Validation accuracy: %.1f%%" % accuracy(valid_prediction.eval(), valid_labels))
