@@ -25,7 +25,7 @@ PATCH_SIZE = 5
 DEPTH = 16  # the number of the convolution-layer's feature maps?
 NUM_HIDDEN = 64  # the number of neurons for fully-connected layer?
 LEARNING_RATE = 0.05
-NUM_STEPS = 1001
+NUM_STEPS = 12501
 
 __author__ = 'kensk8er'
 
@@ -92,15 +92,22 @@ if __name__ == '__main__':
         layer4_weights = tf.Variable(tf.truncated_normal([NUM_HIDDEN, NUM_LABELS], stddev=0.1))
         layer4_biases = tf.Variable(tf.constant(1.0, shape=[NUM_LABELS]))  # why initialized as 1.0??
 
+
         # Model.
         def model(data):
             # 1st (convolution)
-            convolution = tf.nn.conv2d(data, layer1_weights, [1, 2, 2, 1], padding='SAME')
+            convolution = tf.nn.conv2d(data, layer1_weights, [1, 1, 1, 1], padding='SAME')
             hidden = tf.nn.relu(convolution + layer1_biases)
 
+            # max-pooling layer
+            hidden = tf.nn.max_pool(value=hidden, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
+
             # 2nd (convolution)
-            convolution = tf.nn.conv2d(hidden, layer2_weights, [1, 2, 2, 1], padding='SAME')
+            convolution = tf.nn.conv2d(hidden, layer2_weights, [1, 1, 1, 1], padding='SAME')
             hidden = tf.nn.relu(convolution + layer2_biases)
+
+            # max-pooling layer
+            hidden = tf.nn.max_pool(value=hidden, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
 
             # 3rd (fully-connected hidden layer)
             shape = hidden.get_shape().as_list()
@@ -132,7 +139,7 @@ if __name__ == '__main__':
             offset = (step * BATCH_SIZE) % (train_labels.shape[0] - BATCH_SIZE)
             batch_data = train_dataset[offset: (offset + BATCH_SIZE), :, :, :]
             batch_labels = train_labels[offset: (offset + BATCH_SIZE), :]
-            feed_dict = {tf_train_dataset : batch_data, tf_train_labels : batch_labels}
+            feed_dict = {tf_train_dataset: batch_data, tf_train_labels: batch_labels}
 
             _, l, predictions = session.run([optimizer, loss, train_prediction], feed_dict=feed_dict)
 
