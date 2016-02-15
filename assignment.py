@@ -13,15 +13,15 @@ PICKLE_FILE = 'notMNIST.pickle'
 IMAGE_SIZE = 28
 NUM_LABELS = 10
 BATCH_SIZE = 128
-NUM_STEPS = 20001
-HIDDEN_LAYER_1 = 1024
-HIDDEN_LAYER_2 = 300
+NUM_STEPS = 30001
+HIDDEN_LAYER_1 = 2048
+HIDDEN_LAYER_2 = 1024
 INITIAL_LEARNING_RATE = 0.04
 LAMBDA_1 = 0.01
-LAMBDA_2 = 0.01
+LAMBDA_2 = 0.001
 LAMBDA_3 = 0.0001
 DROPOUT_PROBABILITY = 0.5
-EARLY_STOP_PERIOD = 30
+EARLY_STOP_PERIOD = 50
 
 
 def reformat(dataset, labels):
@@ -90,13 +90,13 @@ if __name__ == '__main__':
 
         # Training computation.
         hidden_activations_1 = tf.nn.relu_layer(tf_train_dataset, weights_1, biases_1)
-        # hidden_activations_1 = tf.nn.dropout(hidden_activations_1, DROPOUT_PROBABILITY)
+        hidden_activations_1 = tf.nn.dropout(hidden_activations_1, DROPOUT_PROBABILITY)
         hidden_activations_2 = tf.nn.relu_layer(hidden_activations_1, weights_2, biases_2)
         # hidden_activations_2 = tf.nn.dropout(hidden_activations_2, DROPOUT_PROBABILITY)
         logits = tf.matmul(hidden_activations_2, weights_3) + biases_3
         loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits, tf_train_labels)) + \
                LAMBDA_1 * tf.nn.l2_loss(weights_1) + LAMBDA_2 * tf.nn.l2_loss(weights_2) + LAMBDA_3 * tf.nn.l2_loss(weights_3) + \
-               LAMBDA_1 * tf.nn.l2_loss(biases_1) + LAMBDA_2 * tf.nn.l2_loss(biases_2) + LAMBDA_3 * tf.nn.l2_loss(weights_3) \
+               LAMBDA_1 * tf.nn.l2_loss(biases_1) + LAMBDA_2 * tf.nn.l2_loss(biases_2) + LAMBDA_3 * tf.nn.l2_loss(biases_3) \
 
         # Optimizer.
         optimizer = tf.train.GradientDescentOptimizer(INITIAL_LEARNING_RATE).minimize(loss=loss,
