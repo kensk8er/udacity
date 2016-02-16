@@ -21,11 +21,17 @@ NUM_CHANNELS = 1  # greyscale
 
 # CNN parameters
 BATCH_SIZE = 16
-PATCH_SIZE = 5
-DEPTH = 16  # the number of the convolution-layer's feature maps?
-NUM_HIDDEN = 64  # the number of neurons for fully-connected layer?
-LEARNING_RATE = 0.05
-NUM_STEPS = 12501
+C_1_PATCH_SIZE = 5
+C_1_MAP_NUM = 6  # the number of the feature maps for C-1 layer
+S_2_PATCH_SIZE = 2
+C_3_PATCH_SIZE = 5
+C_3_MAP_NUM = 16  # the number of the feature maps for C-3 layer
+S_4_PATCH_SIZE = 2
+C_5_NEURON_NUM = 120  # the number of neurons for C-5 layer
+F_6_NEURON_NUM = 84  # the number of neurons for F-6 layer
+INITIAL_LEARNING_RATE = 0.05
+NUM_STEPS = 25001
+# NUM_STEPS = 1001
 
 __author__ = 'kensk8er'
 
@@ -79,43 +85,57 @@ if __name__ == '__main__':
         tf_test_dataset = tf.constant(test_dataset)
 
         # Variables.
-        layer1_weights = tf.Variable(tf.truncated_normal([PATCH_SIZE, PATCH_SIZE, NUM_CHANNELS, DEPTH], stddev=0.1))
-        layer1_biases = tf.Variable(tf.zeros([DEPTH]))
+        c_1_weights = tf.Variable(tf.truncated_normal([C_1_PATCH_SIZE, C_1_PATCH_SIZE, NUM_CHANNELS, C_1_MAP_NUM],
+                                                      stddev=0.1))
+        c_1_biases = tf.Variable(tf.zeros([C_1_MAP_NUM]))
 
-        layer2_weights = tf.Variable(tf.truncated_normal([PATCH_SIZE, PATCH_SIZE, DEPTH, DEPTH], stddev=0.1))
-        layer2_biases = tf.Variable(tf.constant(1.0, shape=[DEPTH]))  # why initialized as 1.0??
+        c_3_weights = tf.Variable(tf.truncated_normal([C_3_PATCH_SIZE, C_3_PATCH_SIZE, C_1_MAP_NUM, C_3_MAP_NUM],
+                                                      stddev=0.1))
+        c_3_biases = tf.Variable(tf.constant(1.0, shape=[C_3_MAP_NUM]))  # why initialized as 1.0??
 
-        layer3_weights = tf.Variable(tf.truncated_normal(
-            [IMAGE_SIZE // 4 * IMAGE_SIZE // 4 * DEPTH, NUM_HIDDEN], stddev=0.1))
-        layer3_biases = tf.Variable(tf.constant(1.0, shape=[NUM_HIDDEN]))  # why initialized as 1.0??
+        c_5_feature_size = ((IMAGE_SIZE - C_1_PATCH_SIZE + 1) // 2 - C_3_PATCH_SIZE + 1) // 2
+        c_5_weights = tf.Variable(tf.truncated_normal(
+            [c_5_feature_size * c_5_feature_size * C_3_MAP_NUM, C_5_NEURON_NUM], stddev=0.1))
+        c_5_biases = tf.Variable(tf.constant(1.0, shape=[C_5_NEURON_NUM]))  # why initialized as 1.0??
 
-        layer4_weights = tf.Variable(tf.truncated_normal([NUM_HIDDEN, NUM_LABELS], stddev=0.1))
-        layer4_biases = tf.Variable(tf.constant(1.0, shape=[NUM_LABELS]))  # why initialized as 1.0??
+        f_6_weights = tf.Variable(tf.truncated_normal([C_5_NEURON_NUM, F_6_NEURON_NUM], stddev=0.1))
+        f_6_biases = tf.Variable(tf.constant(1.0, shape=[F_6_NEURON_NUM]))
+
+        output_weights = tf.Variable(tf.truncated_normal([F_6_NEURON_NUM, NUM_LABELS], stddev=0.1))
+        output_biases = tf.Variable(tf.constant(1.0, shape=[NUM_LABELS]))  # why initialized as 1.0??
+
+        global_step = tf.Variable(0, trainable=False)
+        learning_rate = tf.train.exponential_decay(INITIAL_LEARNING_RATE, global_step, decay_steps=1000, decay_rate=0.9)
 
 
         # Model.
         def model(data):
-            # 1st (convolution)
-            convolution = tf.nn.conv2d(data, layer1_weights, [1, 1, 1, 1], padding='SAME')
-            hidden = tf.nn.relu(convolution + layer1_biases)
+            # C-1
+            convolution = tf.nn.conv2d(data, c_1_weights, [1, 1, 1, 1], padding='VALID')
+            hidden = tf.nn.relu(convolution + c_1_biases)
 
-            # max-pooling layer
-            hidden = tf.nn.max_pool(value=hidden, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
+            # S-2
+            hidden = tf.nn.max_pool(value=hidden, ksize=[1, S_2_PATCH_SIZE, S_2_PATCH_SIZE, 1],
+                                    strides=[1, S_2_PATCH_SIZE, S_2_PATCH_SIZE, 1], padding='VALID')
 
-            # 2nd (convolution)
-            convolution = tf.nn.conv2d(hidden, layer2_weights, [1, 1, 1, 1], padding='SAME')
-            hidden = tf.nn.relu(convolution + layer2_biases)
+            # C-3
+            convolution = tf.nn.conv2d(hidden, c_3_weights, [1, 1, 1, 1], padding='VALID')
+            hidden = tf.nn.relu(convolution + c_3_biases)
 
-            # max-pooling layer
-            hidden = tf.nn.max_pool(value=hidden, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
+            # S-4
+            hidden = tf.nn.max_pool(value=hidden, ksize=[1, S_4_PATCH_SIZE, S_4_PATCH_SIZE, 1],
+                                    strides=[1, S_4_PATCH_SIZE, S_4_PATCH_SIZE, 1], padding='VALID')
 
-            # 3rd (fully-connected hidden layer)
+            # C-5
             shape = hidden.get_shape().as_list()
-            reshape = tf.reshape(hidden, [shape[0], shape[1] * shape[2] * shape[3]])  # convert to 1-D?
-            hidden = tf.nn.relu(tf.matmul(reshape, layer3_weights) + layer3_biases)
+            reshape = tf.reshape(hidden, [shape[0], shape[1] * shape[2] * shape[3]])  # convert to 1-D
+            hidden = tf.nn.relu(tf.matmul(reshape, c_5_weights) + c_5_biases)
+
+            # F-6
+            hidden = tf.nn.relu(tf.matmul(hidden, f_6_weights) + f_6_biases)
 
             # 4th (final softmax layer)
-            return tf.matmul(hidden, layer4_weights) + layer4_biases
+            return tf.matmul(hidden, output_weights) + output_biases
 
 
         # Training computation.
@@ -123,7 +143,7 @@ if __name__ == '__main__':
         loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits, tf_train_labels))
 
         # Optimizer.
-        optimizer = tf.train.GradientDescentOptimizer(LEARNING_RATE).minimize(loss)
+        optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss=loss, global_step=global_step)
 
         # Predictions for the training, validation, and test data.
         train_prediction = tf.nn.softmax(logits)
