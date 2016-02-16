@@ -22,16 +22,17 @@ NUM_CHANNELS = 1  # greyscale
 # CNN parameters
 BATCH_SIZE = 16
 C_1_PATCH_SIZE = 5
-C_1_MAP_NUM = 6  # the number of the feature maps for C-1 layer
+C_1_MAP_NUM = 12  # the number of the feature maps for C-1 layer
 S_2_PATCH_SIZE = 2
 C_3_PATCH_SIZE = 5
-C_3_MAP_NUM = 16  # the number of the feature maps for C-3 layer
+C_3_MAP_NUM = 32  # the number of the feature maps for C-3 layer
 S_4_PATCH_SIZE = 2
-C_5_NEURON_NUM = 120  # the number of neurons for C-5 layer
-F_6_NEURON_NUM = 84  # the number of neurons for F-6 layer
+C_5_NEURON_NUM = 240  # the number of neurons for C-5 layer
+F_6_NEURON_NUM = 168  # the number of neurons for F-6 layer
 INITIAL_LEARNING_RATE = 0.05
 NUM_STEPS = 25001
 # NUM_STEPS = 1001
+DROPOUT_PROBABILITY = 0.5
 
 __author__ = 'kensk8er'
 
@@ -109,7 +110,7 @@ if __name__ == '__main__':
 
 
         # Model.
-        def model(data):
+        def model(data, dropout=False):
             # C-1
             convolution = tf.nn.conv2d(data, c_1_weights, [1, 1, 1, 1], padding='VALID')
             hidden = tf.nn.relu(convolution + c_1_biases)
@@ -125,21 +126,27 @@ if __name__ == '__main__':
             # S-4
             hidden = tf.nn.max_pool(value=hidden, ksize=[1, S_4_PATCH_SIZE, S_4_PATCH_SIZE, 1],
                                     strides=[1, S_4_PATCH_SIZE, S_4_PATCH_SIZE, 1], padding='VALID')
+            if dropout:
+                hidden = tf.nn.dropout(hidden, DROPOUT_PROBABILITY)
 
             # C-5
             shape = hidden.get_shape().as_list()
             reshape = tf.reshape(hidden, [shape[0], shape[1] * shape[2] * shape[3]])  # convert to 1-D
             hidden = tf.nn.relu(tf.matmul(reshape, c_5_weights) + c_5_biases)
+            if dropout:
+                hidden = tf.nn.dropout(hidden, DROPOUT_PROBABILITY)
 
             # F-6
             hidden = tf.nn.relu(tf.matmul(hidden, f_6_weights) + f_6_biases)
+            if dropout:
+                hidden = tf.nn.dropout(hidden, DROPOUT_PROBABILITY)
 
             # 4th (final softmax layer)
             return tf.matmul(hidden, output_weights) + output_biases
 
 
         # Training computation.
-        logits = model(tf_train_dataset)
+        logits = model(tf_train_dataset, dropout=True)
         loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits, tf_train_labels))
 
         # Optimizer.
