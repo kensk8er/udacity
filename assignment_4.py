@@ -30,9 +30,10 @@ S_4_PATCH_SIZE = 2
 C_5_NEURON_NUM = 240  # the number of neurons for C-5 layer
 F_6_NEURON_NUM = 168  # the number of neurons for F-6 layer
 INITIAL_LEARNING_RATE = 0.05
-NUM_STEPS = 25001
+NUM_STEPS = 250001
 # NUM_STEPS = 1001
 DROPOUT_PROBABILITY = 0.5
+EARLY_STOP_PERIOD = 10000 / 50
 
 __author__ = 'kensk8er'
 
@@ -157,6 +158,10 @@ if __name__ == '__main__':
         valid_prediction = tf.nn.softmax(model(tf_valid_dataset))
         test_prediction = tf.nn.softmax(model(tf_test_dataset))
 
+    # for early stopping
+    past_valid_accuracy = [0. for _ in range(EARLY_STOP_PERIOD)]
+    average_valid_accuracy = 0.
+
     # Run the CNN defined
     with tf.Session(graph=graph) as session:
         tf.initialize_all_variables().run()
@@ -172,7 +177,16 @@ if __name__ == '__main__':
 
             if step % 50 == 0:
                 print('Minibatch loss at step %d: %f' % (step, l))
-                print('Minibatch accuracy: %.1f%%' % accuracy(predictions, batch_labels))
+                valid_accuracy = accuracy(predictions, batch_labels)
+                print('Minibatch accuracy: %.1f%%' % valid_accuracy)
                 print('Validation accuracy: %.1f%%' % accuracy(valid_prediction.eval(), valid_labels))
+
+                past_valid_accuracy.insert(0, valid_accuracy)
+
+                if np.mean(past_valid_accuracy[:EARLY_STOP_PERIOD]) < average_valid_accuracy:
+                    print('Early Stop.')
+                    break
+                else:
+                    average_valid_accuracy = np.mean(past_valid_accuracy[:EARLY_STOP_PERIOD])
 
         print('Test accuracy: %.1f%%' % accuracy(test_prediction.eval(), test_labels))
