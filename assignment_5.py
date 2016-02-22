@@ -27,7 +27,6 @@ __author__ = 'kensk8er'
 BATCH_SIZE = 128
 EMBEDDING_DIMENSION = 128  # Dimension of the embedding vector.
 SKIP_WINDOW_SIZE = 1  # How many words to consider left and right.
-NUM_SKIPS = 2  # How many times to reuse an input to generate a label.
 
 # We pick a random validation set to sample nearest neighbors. Here we limit the validation samples to the words that have a low numeric ID, which by
 # construction are also the most frequent.
@@ -89,13 +88,10 @@ def build_dataset(words):
     return data, count, dictionary, reverse_dictionary
 
 
-def generate_batch(batch_size, num_skips, skip_window):
+def generate_batch(batch_size, skip_window):
     global data_index
 
-    assert batch_size % num_skips == 0
-    assert num_skips <= 2 * skip_window
-
-    batch = np.ndarray(shape=batch_size, dtype=np.int32)
+    batch = np.ndarray(shape=[batch_size, skip_window * 2], dtype=np.int32)
     labels = np.ndarray(shape=[batch_size, 1], dtype=np.int32)
     span = 2 * skip_window + 1  # [ skip_window target skip_window ]
     buffer = collections.deque(maxlen=span)
@@ -106,19 +102,9 @@ def generate_batch(batch_size, num_skips, skip_window):
         data_index = (data_index + 1) % len(data)
 
     # iterate over a batch
-    for i in range(batch_size // num_skips):
-        target = skip_window  # target label at the center of the buffer
-        targets_to_avoid = [skip_window]
-
-        for j in range(num_skips):
-            # generate target which isn't in targets_to_avoid
-            while target in targets_to_avoid:
-                target = random.randint(0, span - 1)
-
-            targets_to_avoid.append(target)
-            batch[i * num_skips + j] = buffer[skip_window]
-            labels[i * num_skips + j, 0] = buffer[target]
-
+    for i in range(batch_size):
+        batch[i] = [word_id for buffer_id, word_id in enumerate(buffer) if buffer_id != skip_window]
+        labels[i, 0] = buffer[skip_window]
         buffer.append(data[data_index])
         data_index = (data_index + 1) % len(data)
 
@@ -178,18 +164,19 @@ if __name__ == '__main__':
 
     with graph.as_default():
         # Input data.
-        train_dataset = tf.placeholder(tf.int32, shape=[BATCH_SIZE])
+        train_dataset = tf.placeholder(tf.int32, shape=[BATCH_SIZE, SKIP_WINDOW_SIZE * 2])
         train_labels = tf.placeholder(tf.int32, shape=[BATCH_SIZE, 1])
         valid_dataset = tf.constant(valid_examples, dtype=tf.int32)
 
         # Variables.
         embeddings = tf.Variable(tf.random_uniform([VOCABULARY_SIZE, EMBEDDING_DIMENSION], minval=-1.0, maxval=1.0))
-        softmax_weights = tf.Variable(tf.truncated_normal([VOCABULARY_SIZE, EMBEDDING_DIMENSION], stddev=1.0 / math.sqrt(EMBEDDING_DIMENSION)))
+        softmax_weights = tf.Variable(tf.truncated_normal([VOCABULARY_SIZE, EMBEDDING_DIMENSION * SKIP_WINDOW_SIZE * 2],
+                                                          stddev=1.0 / math.sqrt(EMBEDDING_DIMENSION)))
         softmax_biases = tf.Variable(tf.zeros([VOCABULARY_SIZE]))
 
         # Model.
         # Look up embeddings for inputs.
-        embed = tf.nn.embedding_lookup(embeddings, train_dataset)
+        embed = tf.reshape(tf.nn.embedding_lookup(embeddings, train_dataset), shape=[BATCH_SIZE, -1])
 
         # Compute the softmax loss, using a sample of the negative labels each time.
         loss = tf.reduce_mean(tf.nn.sampled_softmax_loss(softmax_weights, softmax_biases, embed, train_labels, NUM_SAMPLED, VOCABULARY_SIZE))
@@ -215,7 +202,7 @@ if __name__ == '__main__':
         average_loss = 0.
 
         for step in range(NUM_STEPS):
-            batch_data, batch_labels = generate_batch(BATCH_SIZE, NUM_SKIPS, SKIP_WINDOW_SIZE)
+            batch_data, batch_labels = generate_batch(BATCH_SIZE, SKIP_WINDOW_SIZE)
             feed_dict = {train_dataset: batch_data, train_labels: batch_labels}
             _, l = session.run([optimizer, loss], feed_dict=feed_dict)
             average_loss += l
