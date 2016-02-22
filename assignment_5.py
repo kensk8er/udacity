@@ -25,12 +25,11 @@ DATASET_FILE = os.path.join(PROJECT_ROOT, 'text8.pkl')
 __author__ = 'kensk8er'
 
 BATCH_SIZE = 128
-EMBEDDING_SIZE = 128  # Dimension of the embedding vector.
-SKIP_WINDOW = 1  # How many words to consider left and right.
+EMBEDDING_DIMENSION = 128  # Dimension of the embedding vector.
+SKIP_WINDOW_SIZE = 1  # How many words to consider left and right.
 NUM_SKIPS = 2  # How many times to reuse an input to generate a label.
 
-# We pick a random validation set to sample nearest neighbors. here we limit the
-# validation samples to the words that have a low numeric ID, which by
+# We pick a random validation set to sample nearest neighbors. Here we limit the validation samples to the words that have a low numeric ID, which by
 # construction are also the most frequent.
 VALID_SIZE = 16  # Random set of words to evaluate similarity on.
 VALID_WINDOW = 100  # Only pick dev samples in the head of the distribution.
@@ -38,6 +37,7 @@ NUM_SAMPLED = 64  # Number of negative examples to sample.
 
 NUM_STEPS = 100001
 
+# the number of words to show on the 2d visualization
 NUM_POINTS = 400
 
 
@@ -183,8 +183,8 @@ if __name__ == '__main__':
         valid_dataset = tf.constant(valid_examples, dtype=tf.int32)
 
         # Variables.
-        embeddings = tf.Variable(tf.random_uniform([VOCABULARY_SIZE, EMBEDDING_SIZE], minval=-1.0, maxval=1.0))
-        softmax_weights = tf.Variable(tf.truncated_normal([VOCABULARY_SIZE, EMBEDDING_SIZE], stddev=1.0 / math.sqrt(EMBEDDING_SIZE)))
+        embeddings = tf.Variable(tf.random_uniform([VOCABULARY_SIZE, EMBEDDING_DIMENSION], minval=-1.0, maxval=1.0))
+        softmax_weights = tf.Variable(tf.truncated_normal([VOCABULARY_SIZE, EMBEDDING_DIMENSION], stddev=1.0 / math.sqrt(EMBEDDING_DIMENSION)))
         softmax_biases = tf.Variable(tf.zeros([VOCABULARY_SIZE]))
 
         # Model.
@@ -203,6 +203,8 @@ if __name__ == '__main__':
         valid_embeddings = tf.nn.embedding_lookup(normalized_embeddings, valid_dataset)
         similarity = tf.matmul(valid_embeddings, tf.transpose(normalized_embeddings))
 
+    # # Run the graph
+
     # initialize data_index
     data_index = 0
 
@@ -213,7 +215,7 @@ if __name__ == '__main__':
         average_loss = 0.
 
         for step in range(NUM_STEPS):
-            batch_data, batch_labels = generate_batch(BATCH_SIZE, NUM_SKIPS, SKIP_WINDOW)
+            batch_data, batch_labels = generate_batch(BATCH_SIZE, NUM_SKIPS, SKIP_WINDOW_SIZE)
             feed_dict = {train_dataset: batch_data, train_labels: batch_labels}
             _, l = session.run([optimizer, loss], feed_dict=feed_dict)
             average_loss += l
@@ -244,8 +246,10 @@ if __name__ == '__main__':
 
         final_embeddings = normalized_embeddings.eval()
 
+    # reduce to 2-dimension
     tsne = TSNE(perplexity=30, n_components=2, init='pca', n_iter=5000)
     two_d_embeddings = tsne.fit_transform(final_embeddings[1: NUM_POINTS + 1, :])
 
+    # visualize the embeddings
     words = [reverse_dictionary[i] for i in range(1, NUM_POINTS + 1)]
     plot(two_d_embeddings, words)
