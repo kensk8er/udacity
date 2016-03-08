@@ -28,6 +28,7 @@ NUM_UNROLLINGS = 10
 NUM_NODES = 64
 NUM_STEPS = 7001
 SUMMARY_FREQUENCY = 100
+EMBEDDING_DIMENSION = 128
 
 
 def maybe_download(filename, expected_bytes):
@@ -171,7 +172,7 @@ if __name__ == '__main__':
     graph = tf.Graph()
     with graph.as_default():
         # Parameters for input, forget, cell state, and output gates
-        W_lstm = tf.Variable(tf.truncated_normal([vocabulary_size + NUM_NODES, NUM_NODES * 4]))
+        W_lstm = tf.Variable(tf.truncated_normal([EMBEDDING_DIMENSION + NUM_NODES, NUM_NODES * 4]))
         b_lstm = tf.Variable(tf.zeros([1, NUM_NODES * 4]))
 
         # Variables saving state across unrollings.
@@ -182,6 +183,8 @@ if __name__ == '__main__':
         W = tf.Variable(tf.truncated_normal([NUM_NODES, vocabulary_size], -0.1, 0.1))
         b = tf.Variable(tf.zeros([vocabulary_size]))
 
+        # embedding
+        embeddings = tf.Variable(tf.random_uniform([vocabulary_size, EMBEDDING_DIMENSION], minval=-1.0, maxval=1.0))
 
         # Definition of the cell computation.
         def lstm_cell(X, output, state):
@@ -201,12 +204,11 @@ if __name__ == '__main__':
 
 
         # Input data.
-        train_data = list()
-        for _ in range(NUM_UNROLLINGS + 1):
-            train_data.append(tf.placeholder(tf.float32, shape=[BATCH_SIZE, vocabulary_size]))
-
-        train_X = train_data[:NUM_UNROLLINGS]
-        train_labels = train_data[1:]  # labels are inputs shifted by one time step.
+        train_X = list()
+        train_labels = list()
+        for _ in range(NUM_UNROLLINGS):
+            train_X.append(tf.placeholder(tf.int32, shape=[BATCH_SIZE, 1]))
+            train_labels.append(tf.placeholder(tf.float32, shape=[BATCH_SIZE, vocabulary_size]))
 
         # Unrolled LSTM loop.
         outputs = list()
@@ -214,7 +216,8 @@ if __name__ == '__main__':
         state = previous_state
 
         for X in train_X:
-            output, state = lstm_cell(X, output, state)
+            embed = tf.reshape(tf.nn.embedding_lookup(embeddings, X), shape=[BATCH_SIZE, -1])
+            output, state = lstm_cell(embed, output, state)
             outputs.append(output)
 
         # State saving across unrollings.
@@ -235,11 +238,12 @@ if __name__ == '__main__':
         train_prediction = tf.nn.softmax(logits)
 
         # Sampling and validation eval: batch 1, no unrolling.
-        sample_input = tf.placeholder(tf.float32, shape=[1, vocabulary_size])
+        sample_input = tf.placeholder(tf.int32, shape=[1, 1])
+        sample_embed = tf.reshape(tf.nn.embedding_lookup(embeddings, sample_input), shape=[1, -1])
         previous_sample_output = tf.Variable(tf.zeros([1, NUM_NODES]))
         previous_sample_state = tf.Variable(tf.zeros([1, NUM_NODES]))
         reset_sample_state = tf.group(previous_sample_output.assign(tf.zeros([1, NUM_NODES])), previous_sample_state.assign(tf.zeros([1, NUM_NODES])))
-        sample_output, sample_state = lstm_cell(sample_input, previous_sample_output, previous_sample_state)
+        sample_output, sample_state = lstm_cell(sample_embed, previous_sample_output, previous_sample_state)
 
         with tf.control_dependencies([previous_sample_output.assign(sample_output), previous_sample_state.assign(sample_state)]):
             sample_prediction = tf.nn.softmax(tf.nn.xw_plus_b(sample_output, W, b))
@@ -255,8 +259,9 @@ if __name__ == '__main__':
             batches = train_batches.next()
             feed_dict = dict()
 
-            for X in range(NUM_UNROLLINGS + 1):
-                feed_dict[train_data[X]] = batches[X]
+            for batch_id in range(NUM_UNROLLINGS):
+                feed_dict[train_X[batch_id]] = np.where(batches[batch_id] == 1)[1].reshape((-1, 1))
+                feed_dict[train_labels[batch_id]] = batches[batch_id + 1]
 
             _, l, predictions, lr = session.run([optimizer, loss, train_prediction, learning_rate], feed_dict=feed_dict)
 
@@ -283,6 +288,7 @@ if __name__ == '__main__':
                         reset_sample_state.run()
 
                         for _ in range(79):
+                            feed = np.where(feed == 1)[1].reshape((-1, 1))
                             prediction = sample_prediction.eval({sample_input: feed})
                             feed = sample(prediction)
                             sentence += characters(feed)[0]
@@ -297,7 +303,7 @@ if __name__ == '__main__':
 
                 for _ in range(VALID_SIZE):
                     valid_batch = valid_batches.next()
-                    predictions = sample_prediction.eval({sample_input: valid_batch[0]})
+                    predictions = sample_prediction.eval({sample_input: np.where(valid_batch[0] == 1)[1].reshape((-1, 1))})
                     valid_log_prob = valid_log_prob + log_prob(predictions, valid_batch[1])
 
                 print('Validation set perplexity: %.2f' % float(np.exp(valid_log_prob / VALID_SIZE)))
