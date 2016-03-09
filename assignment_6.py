@@ -24,10 +24,11 @@ VALID_SIZE = 1000
 # model parameters
 BATCH_SIZE = 64
 NUM_UNROLLINGS = 10
-NUM_NODES = 64
-NUM_STEPS = 7001
+NUM_NODES = 128
+NUM_STEPS = 30001
 SUMMARY_FREQUENCY = 100
 EMBEDDING_DIMENSION = 128
+DROPOUT_PROBABILITY = 0.5
 
 CHARACTER_SIZE = (len(string.ascii_lowercase) + 1)  # [a-z] + ' '
 VOCABULARY_SIZE = CHARACTER_SIZE ** 2  # [a-z] + ' ' (bigram)
@@ -252,7 +253,7 @@ if __name__ == '__main__':
         # State saving across unrollings.
         with tf.control_dependencies([previous_output.assign(output), previous_state.assign(state)]):
             # Classifier.
-            logits = tf.nn.xw_plus_b(tf.concat(0, outputs), W, b)
+            logits = tf.nn.xw_plus_b(tf.nn.dropout(tf.concat(0, outputs), DROPOUT_PROBABILITY), W, b)
             loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits, tf.concat(0, train_labels)))
 
         # Optimizer.
