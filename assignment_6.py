@@ -108,7 +108,7 @@ class BatchGenerator(object):
 
         for batch_id in range(self._batch_size):
             batch[batch_id, bigram2id(self._text[self._cursor[batch_id]: self._cursor[batch_id] + 2])] = 1.0
-            self._cursor[batch_id] = (self._cursor[batch_id] + 1) % (self._text_size - 1)
+            self._cursor[batch_id] = (self._cursor[batch_id] + 2) % (self._text_size - 1)
 
         return batch
 
@@ -210,8 +210,8 @@ if __name__ == '__main__':
         previous_state = tf.Variable(tf.zeros([BATCH_SIZE, NUM_NODES]), trainable=False)
 
         # Classifier weights and biases.
-        W = tf.Variable(tf.truncated_normal([NUM_NODES, CHARACTER_SIZE], -0.1, 0.1))
-        b = tf.Variable(tf.zeros([CHARACTER_SIZE]))
+        W = tf.Variable(tf.truncated_normal([NUM_NODES, VOCABULARY_SIZE], -0.1, 0.1))
+        b = tf.Variable(tf.zeros([VOCABULARY_SIZE]))
 
         # embedding
         embeddings = tf.Variable(tf.random_uniform([VOCABULARY_SIZE, EMBEDDING_DIMENSION], minval=-1.0, maxval=1.0))
@@ -238,7 +238,7 @@ if __name__ == '__main__':
         train_labels = list()
         for _ in range(NUM_UNROLLINGS):
             train_X.append(tf.placeholder(tf.int32, shape=[BATCH_SIZE, 1]))
-            train_labels.append(tf.placeholder(tf.float32, shape=[BATCH_SIZE, CHARACTER_SIZE]))
+            train_labels.append(tf.placeholder(tf.float32, shape=[BATCH_SIZE, VOCABULARY_SIZE]))
 
         # Unrolled LSTM loop.
         outputs = list()
@@ -291,7 +291,7 @@ if __name__ == '__main__':
 
             for batch_id in range(NUM_UNROLLINGS):
                 feed_dict[train_X[batch_id]] = np.where(batches[batch_id] == 1)[1].reshape((-1, 1))
-                feed_dict[train_labels[batch_id]] = bigram_label2unigram_label(batches[batch_id + 1])
+                feed_dict[train_labels[batch_id]] = batches[batch_id + 1]
 
             _, l, predictions, lr = session.run([optimizer, loss, train_prediction, learning_rate], feed_dict=feed_dict)
 
@@ -305,7 +305,7 @@ if __name__ == '__main__':
                 print('Average loss at step %d: %f learning rate: %f' % (step, mean_loss, lr))
 
                 mean_loss = 0
-                labels = np.concatenate([bigram_label2unigram_label(batch) for batch in batches[1:]])
+                labels = np.concatenate([batch for batch in batches[1:]])
                 print('Minibatch perplexity: %.2f' % float(np.exp(log_prob(predictions, labels))))
 
                 if step % (SUMMARY_FREQUENCY * 10) == 0:
@@ -321,7 +321,7 @@ if __name__ == '__main__':
                             feed = np.where(feed == 1)[1].reshape((-1, 1))
                             prediction = sample_prediction.eval({sample_input: feed})
                             feed = sample(prediction)
-                            sentence += characters(feed)[0]
+                            sentence += ''.join(bigrams(feed))
                             last_bigram_id = bigram2id(sentence[-2:])
                             feed = np.array([[float(last_bigram_id == bigram_id) for bigram_id in range(VOCABULARY_SIZE)]])
 
@@ -336,6 +336,6 @@ if __name__ == '__main__':
                 for _ in range(VALID_SIZE):
                     valid_batch = valid_batches.next()
                     predictions = sample_prediction.eval({sample_input: np.where(valid_batch[0] == 1)[1].reshape((-1, 1))})
-                    valid_log_prob = valid_log_prob + log_prob(predictions, bigram_label2unigram_label(valid_batch[1], batch_size=1))
+                    valid_log_prob = valid_log_prob + log_prob(predictions, valid_batch[1])
 
                 print('Validation set perplexity: %.2f' % float(np.exp(valid_log_prob / VALID_SIZE)))
