@@ -93,6 +93,8 @@ def mirror_string(string):
 
     if space_index:
         string = "{0} {1}".format(string[:space_index], string[space_index + 1:][::-1])
+    else:
+        string = string[::-1]
 
     return string
 
@@ -211,7 +213,7 @@ if __name__ == '__main__':
         # Initial values for output, state and X
         initial_output = tf.constant(np.zeros([BATCH_SIZE, NUM_NODES]), dtype=tf.float32)
         initial_state = tf.constant(np.zeros([BATCH_SIZE, NUM_NODES]), dtype=tf.float32)
-        X_initial = tf.constant(np.zeros([BATCH_SIZE, VOCABULARY_SIZE]), dtype=tf.float32)
+        X_initial = tf.constant(np.ones([BATCH_SIZE, VOCABULARY_SIZE]), dtype=tf.float32)
 
         # Classifier weights and biases.
         W = tf.Variable(tf.truncated_normal([NUM_NODES, VOCABULARY_SIZE], -0.1, 0.1))
