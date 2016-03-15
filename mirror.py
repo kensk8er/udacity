@@ -23,13 +23,12 @@ VALID_SIZE = 100
 
 # model parameters
 BATCH_SIZE = 64
-NUM_UNROLLINGS = 20
+NUM_UNROLLINGS = 10
 NUM_NODES = 128
 NUM_STEPS = 30001
 SUMMARY_FREQUENCY = 100
-DROPOUT_PROBABILITY = 0.5
 
-VOCABULARY_SIZE = (len(string.ascii_lowercase) + 1)  # [a-z] + ' '
+VOCABULARY_SIZE = (len(string.ascii_lowercase) + 2)  # [a-z] + ' ' + initial X for prediction
 FIRST_LETTER = ord(string.ascii_lowercase[0])
 
 
@@ -73,6 +72,8 @@ def id2char(char_id):
 
 
 def mirror_string(string):
+    return string[::-1]
+
     space = ' '
     previous_index = None
     space_index = None
@@ -211,9 +212,15 @@ if __name__ == '__main__':
         b_lstm = tf.Variable(tf.zeros([1, NUM_NODES * 4]))
 
         # Initial values for output, state and X
-        initial_output = tf.constant(np.zeros([BATCH_SIZE, NUM_NODES]), dtype=tf.float32)
-        initial_state = tf.constant(np.zeros([BATCH_SIZE, NUM_NODES]), dtype=tf.float32)
-        X_initial = tf.constant(np.ones([BATCH_SIZE, VOCABULARY_SIZE]), dtype=tf.float32)
+        initial_train_output = tf.constant(np.zeros([BATCH_SIZE, NUM_NODES]), dtype=tf.float32)
+        initial_train_state = tf.constant(np.zeros([BATCH_SIZE, NUM_NODES]), dtype=tf.float32)
+        train_X_initial = tf.constant(
+            np.array([[1. if char_id == VOCABULARY_SIZE - 1 else 0. for char_id in range(VOCABULARY_SIZE)] for _ in range(BATCH_SIZE)]), dtype=tf.float32)
+
+        initial_sample_output = tf.constant(np.zeros([1, NUM_NODES]), dtype=tf.float32)
+        initial_sample_state = tf.constant(np.zeros([1, NUM_NODES]), dtype=tf.float32)
+        valid_X_initial = tf.constant(
+            np.array([[1. if char_id == VOCABULARY_SIZE - 1 else 0. for char_id in range(VOCABULARY_SIZE)] for _ in range(1)]), dtype=tf.float32)
 
         # Classifier weights and biases.
         W = tf.Variable(tf.truncated_normal([NUM_NODES, VOCABULARY_SIZE], -0.1, 0.1))
@@ -244,32 +251,27 @@ if __name__ == '__main__':
             train_labels.append(tf.placeholder(tf.float32, shape=[BATCH_SIZE, VOCABULARY_SIZE]))
 
         # Unrolled LSTM loop.
-        output = initial_output
-        state = initial_state
+        train_output = initial_train_output
+        train_state = initial_train_state
 
         # memorizing input sequence
         for train_x in train_X:
-            output, state = lstm_cell(train_x, output, state)
+            train_output, train_state = lstm_cell(train_x, train_output, train_state)
 
         # predicting mirrored sequence
-        train_predict_X = X_initial
+        train_predict_X = train_X_initial
         losses = list()
-        train_predictions = list()
+        train_prediction_list = list()
         for unroll_id in range(NUM_UNROLLINGS):
-            output, state = lstm_cell(train_predict_X, output, state)
-            train_logit = tf.nn.xw_plus_b(output, W, b)
+            train_output, train_state = lstm_cell(train_predict_X, train_output, train_state)
+            train_logit = tf.nn.xw_plus_b(train_output, W, b)
             train_predict_X = tf.nn.softmax(train_logit)
-            train_predictions.append(train_predict_X)
+            train_prediction_list.append(train_predict_X)
 
-            loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(train_logit, train_labels[unroll_id]))
-            losses.append(loss)
+            loss_ = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(train_logit, train_labels[unroll_id]))
+            losses.append(loss_)
 
-        train_predictions = tf.reshape(tf.concat(1, train_predictions), [-1, VOCABULARY_SIZE])
-
-        # # Classifier.
-        # logits = tf.nn.xw_plus_b(tf.nn.dropout(tf.concat(0, outputs), DROPOUT_PROBABILITY), W, b)
-        # loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits, tf.concat(0, train_labels)))
-        # loss = tf.concat(0, losses)
+        train_predictions = tf.reshape(tf.concat(1, train_prediction_list), [-1, VOCABULARY_SIZE])
         loss = tf.add_n(losses)
 
         # Optimizer.
@@ -280,18 +282,12 @@ if __name__ == '__main__':
         gradients, _ = tf.clip_by_global_norm(gradients, 1.25)
         optimizer = optimizer.apply_gradients(zip(gradients, v), global_step=global_step)
 
-        # # Predictions.
-        # train_prediction = tf.nn.softmax(logits)
-
         # Sampling and validation eval: batch 1, no unrolling.
         valid_X = list()
         valid_labels = list()
         for _ in range(NUM_UNROLLINGS):
             valid_X.append(tf.placeholder(tf.float32, shape=[1, VOCABULARY_SIZE]))
             valid_labels.append(tf.placeholder(tf.float32, shape=[1, VOCABULARY_SIZE]))
-
-        initial_sample_output = tf.constant(np.zeros([1, NUM_NODES]), dtype=tf.float32)
-        initial_sample_state = tf.constant(np.zeros([1, NUM_NODES]), dtype=tf.float32)
 
         sample_output = initial_sample_output
         sample_state = initial_sample_state
@@ -301,16 +297,15 @@ if __name__ == '__main__':
             sample_output, sample_state = lstm_cell(valid_x, sample_output, sample_state)
 
         # predicting mirrored sequence
-        valid_initial_X = tf.constant(np.zeros([1, VOCABULARY_SIZE]), dtype=tf.float32)
-        valid_predict_X = valid_initial_X
-        sample_predictions = list()
-        for unroll_id in range(NUM_UNROLLINGS):
+        valid_predict_X = valid_X_initial
+        valid_prediction_list = list()
+        for _ in range(NUM_UNROLLINGS):
             sample_output, sample_state = lstm_cell(valid_predict_X, sample_output, sample_state)
             sample_logit = tf.nn.xw_plus_b(sample_output, W, b)
             valid_predict_X = tf.nn.softmax(sample_logit)
-            sample_predictions.append(valid_predict_X)
+            valid_prediction_list.append(valid_predict_X)
 
-        sample_predictions = tf.reshape(tf.concat(1, sample_predictions), [-1, VOCABULARY_SIZE])
+        sample_predictions = tf.reshape(tf.concat(1, valid_prediction_list), [-1, VOCABULARY_SIZE])
 
     # Run the model
     with tf.Session(graph=graph) as session:
@@ -319,14 +314,14 @@ if __name__ == '__main__':
         mean_loss = 0
 
         for step in range(NUM_STEPS):
-            batches, labels = train_batches.next()
+            train_batch, train_label = train_batches.next()
             feed_dict = dict()
 
             for batch_id in range(NUM_UNROLLINGS):
-                feed_dict[train_X[batch_id]] = batches[batch_id]
-                feed_dict[train_labels[batch_id]] = labels[batch_id]
+                feed_dict[train_X[batch_id]] = train_batch[batch_id]
+                feed_dict[train_labels[batch_id]] = train_label[batch_id]
 
-            _, l, predictions, lr = session.run([optimizer, loss, train_predictions, learning_rate], feed_dict=feed_dict)
+            _, l, train_predictions_, lr = session.run([optimizer, loss, train_predictions, learning_rate], feed_dict=feed_dict)
 
             mean_loss += l
 
@@ -338,19 +333,19 @@ if __name__ == '__main__':
                 print('Average loss at step %d: %f learning rate: %f' % (step, mean_loss, lr))
 
                 mean_loss = 0
-                labels = np.concatenate(labels)
-                print('Minibatch perplexity: %.2f' % float(np.exp(log_prob(predictions, labels))))
+                labels = np.concatenate(train_label)
+                print('Minibatch perplexity: %.2f' % float(np.exp(log_prob(train_predictions_, labels))))
 
                 if step % (SUMMARY_FREQUENCY * 10) == 0:
                     # Generate some samples.
                     print('=' * 80)
 
                     for _ in range(5):
-                        batches, _ = valid_batches.next()
-                        sentence = '"' + batches2string(batches)[0] + '" -> "'
+                        valid_batch, _ = valid_batches.next()
+                        sentence = '"' + batches2string(valid_batch)[0] + '" -> "'
 
-                        predictions = sample_predictions.eval({valid_X[batch_id]: batches[batch_id] for batch_id in range(len(batches))})
-                        sentence += ''.join(characters(predictions))
+                        sample_predictions_ = sample_predictions.eval({valid_X[batch_id]: valid_batch[batch_id] for batch_id in range(len(valid_batch))})
+                        sentence += ''.join(characters(sample_predictions_))
                         print(sentence + '"\n')
 
                     print('=' * 80)
@@ -359,9 +354,9 @@ if __name__ == '__main__':
                 valid_log_prob = 0
 
                 for _ in range(VALID_SIZE):
-                    batches, labels = valid_batches.next()
-                    predictions = sample_predictions.eval({valid_X[batch_id]: batches[batch_id] for batch_id in range(len(batches))})
-                    labels = np.concatenate(labels)
-                    valid_log_prob = valid_log_prob + log_prob(predictions, labels)
+                    valid_batch, valid_label = valid_batches.next()
+                    sample_predictions_ = sample_predictions.eval({valid_X[batch_id]: valid_batch[batch_id] for batch_id in range(len(valid_batch))})
+                    labels = np.concatenate(valid_label)
+                    valid_log_prob = valid_log_prob + log_prob(sample_predictions_, labels)
 
                 print('Validation set perplexity: %.2f' % float(np.exp(valid_log_prob / VALID_SIZE)))
