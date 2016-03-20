@@ -23,7 +23,7 @@ VALID_SIZE = 100
 
 # model parameters
 BATCH_SIZE = 64
-NUM_UNROLLINGS = 10
+NUM_UNROLLINGS = 7
 NUM_NODES = 128
 NUM_STEPS = 30001
 SUMMARY_FREQUENCY = 100
@@ -72,8 +72,6 @@ def id2char(char_id):
 
 
 def mirror_string(string):
-    return string[::-1]
-
     space = ' '
     previous_index = None
     space_index = None
@@ -250,6 +248,9 @@ if __name__ == '__main__':
             train_X.append(tf.placeholder(tf.float32, shape=[BATCH_SIZE, VOCABULARY_SIZE]))
             train_labels.append(tf.placeholder(tf.float32, shape=[BATCH_SIZE, VOCABULARY_SIZE]))
 
+        # reverse the input
+        train_X.reverse()
+
         # Unrolled LSTM loop.
         train_output = initial_train_output
         train_state = initial_train_state
@@ -288,6 +289,9 @@ if __name__ == '__main__':
         for _ in range(NUM_UNROLLINGS):
             valid_X.append(tf.placeholder(tf.float32, shape=[1, VOCABULARY_SIZE]))
             valid_labels.append(tf.placeholder(tf.float32, shape=[1, VOCABULARY_SIZE]))
+
+        # reverse the input
+        valid_X.reverse()
 
         sample_output = initial_sample_output
         sample_state = initial_sample_state
